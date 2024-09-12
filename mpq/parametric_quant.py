@@ -5,6 +5,11 @@ from typing import cast
 import numpy as np
 import torch
 from torch import Tensor, nn
+import json
+
+
+with open('training_config.json') as f:
+    config = json.load(f)
 
 
 class STECeil(torch.autograd.Function):
@@ -49,7 +54,9 @@ class Quantizer(nn.Module):
         from torch.nn.parameter import Parameter
 
         super().__init__()
-        grad = not fix_parameters
+        # TODO: change design of this to used grad not from config but from constructor
+        # grad = not fix_parameters
+        grad = not config['fix_parameters']
         self.qmax = Parameter(torch.tensor(qmax.init), requires_grad=grad)
         self.qmax_min, self.qmax_max = qmax.min, qmax.max
         self.step = Parameter(torch.tensor(step.init), requires_grad=grad)
