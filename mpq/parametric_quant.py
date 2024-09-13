@@ -214,9 +214,13 @@ class MPQReLU(MPQModule):
         self._last_activ_shape: torch.Size | None = None
 
     def forward(self, x: Tensor) -> Tensor:
-        # No need to apply ReLU -- quantization is unsigned
         ret = self.quant_a(x)
-        assert torch.all(ret >= 0)
+        # No need to apply ReLU -- quantization is unsigned
+        if self.quant_a.mode != "bypass":
+            assert torch.all(ret >= 0)
+        else:
+            # we don't apply quantization, so we need to apply ReLU here
+            ret = torch.relu(ret)
         assert ret.shape == x.shape
         self._last_activ_shape = x.shape
         return ret
