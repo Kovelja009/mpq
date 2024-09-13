@@ -1,5 +1,5 @@
 {
     "n_epochs": 4,
     "milestones": [30, 45],
-    "fix_parameters" : true
+    "quantizer_mode" : "bypass"
 }

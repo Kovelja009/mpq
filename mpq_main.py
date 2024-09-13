@@ -15,6 +15,8 @@ class CIFAR10MPQTrainer(pl.LightningModule):
         self.network = network
         self.qlayers = self._detect_layers(network, MPQModule)
         self.quantizers = self._detect_layers(network, Quantizer)
+        for quantizer in self.quantizers.values():
+            quantizer.set_mode(config["quantizer_mode"])
         self.top1 = Accuracy("multiclass", num_classes=10, top_k=1)
         self.config = config
 
@@ -31,12 +33,12 @@ class CIFAR10MPQTrainer(pl.LightningModule):
         for name, quantizer in self.quantizers.items():
             self.log(f"qbits/{name}", quantizer.b())
         
-        if config["fix_parameters"]:
-            return ce_loss
-        else:
+        if config["quantizer_mode"] == "mpq":
         # TODO: this. 0.1 is not appropriate
         # because our DNN is actually larger than theirs (Sony's).
             return ce_loss + 0.1 * weight_kb + 0.1 * activ_kb
+        else:
+            return ce_loss
 
     def validation_step(self, batch, batch_idx):
         from torch.nn.functional import cross_entropy
