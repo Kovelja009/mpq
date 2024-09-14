@@ -81,6 +81,12 @@ class Quantizer(nn.Module):
         self.qmax.data.copy_(qmax)
 
     def b(self) -> Tensor:
+        if not self.activated:
+            # In bypass mode no quantization happens, so we return 32 bit.
+            # Returning a constant ensures that gradient on this value is 0.
+            # TODO: we return 32 bits, but this is float32, not int32.
+            # We don't have a way to distinguish float{n} and int{n}.
+            return torch.tensor(32.0)
         # Calculate the bitwidth from the step size and max value.
         self._clip_params()
         # Compute real `qmax`. According to Sony impl, this step is only done when reading `b`.

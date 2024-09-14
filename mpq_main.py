@@ -1,14 +1,15 @@
 from typing import TypeVar
 
 import pytorch_lightning as pl
-from mpq import MPQModule, Quantizer, resnet18
 from torch import nn
+
+from mpq import MPQModule, Quantizer, resnet18
 
 T = TypeVar("T", bound=nn.Module)
 
 
 class CIFAR10MPQTrainer(pl.LightningModule):
-    def __init__(self, network: nn.Module, config:dict) -> None:
+    def __init__(self, network: nn.Module, config: dict) -> None:
         from torchmetrics import Accuracy
 
         super().__init__()
@@ -19,6 +20,7 @@ class CIFAR10MPQTrainer(pl.LightningModule):
             quantizer.set_mode(config["quantizer_mode"])
         self.top1 = Accuracy("multiclass", num_classes=10, top_k=1)
         self.config = config
+        self.save_hyperparameters(config)
 
     def training_step(self, batch, batch_idx):
         from torch.nn.functional import cross_entropy
@@ -32,13 +34,11 @@ class CIFAR10MPQTrainer(pl.LightningModule):
         self.log("train/activ_kb", activ_kb)
         for name, quantizer in self.quantizers.items():
             self.log(f"qbits/{name}", quantizer.b())
-        
-        if config["quantizer_mode"] == "mpq":
+        # NOTE: When Quantizers are in bypass mode, weight_kb and activ_kb are constant
+        # so it's fine to add them in.
         # TODO: this. 0.1 is not appropriate
         # because our DNN is actually larger than theirs (Sony's).
-            return ce_loss + 0.1 * weight_kb + 0.1 * activ_kb
-        else:
-            return ce_loss
+        return ce_loss + 0.1 * weight_kb + 0.1 * activ_kb
 
     def validation_step(self, batch, batch_idx):
         from torch.nn.functional import cross_entropy
@@ -83,7 +83,9 @@ class CIFAR10MPQTrainer(pl.LightningModule):
         optimizer = SGD(
             self.network.parameters(), lr=0.03, momentum=0.9, weight_decay=5e-4
         )
-        scheduler = MultiStepLR(optimizer, milestones=self.config["milestones"], gamma=0.1)
+        scheduler = MultiStepLR(
+            optimizer, milestones=self.config["milestones"], gamma=0.1
+        )
         return [optimizer], [scheduler]
 
     def compute_sizes_kb(self):
@@ -135,7 +137,10 @@ def train_mpq(config: dict):
     lrm = plcb.LearningRateMonitor()
     # TODO: Sony impl has custom gradient clipping for d and qmax only
     trainer = pl.Trainer(
-        devices=1, max_epochs=config["n_epochs"], callbacks=[ckpt, lrm], gradient_clip_val=0.1
+        devices=1,
+        max_epochs=config["n_epochs"],
+        callbacks=[ckpt, lrm],
+        gradient_clip_val=0.1,
     )
     trainer.fit(model)
 
@@ -143,8 +148,8 @@ def train_mpq(config: dict):
 if __name__ == "__main__":
     # Load the training configuration
     import json
-    with open('training_config.json') as f:
+
+    with open("training_config.json") as f:
         config = json.load(f)
 
     train_mpq(config)
-
