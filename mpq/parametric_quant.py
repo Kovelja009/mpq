@@ -56,16 +56,17 @@ class Quantizer(nn.Module):
         self.step_min, self.step_max = step.min, step.max
         self.signed = signed
         self.b_min = b_min
+        self.activated = True
 
     def set_mode(self, mode: str):
-        self.mode = mode
         if mode in ["fixed", "bypass"]:
             self.qmax.requires_grad = False
             self.step.requires_grad = False
+            if mode == "bypass":
+                self.activated = False
         elif mode == "mpq":
             self.qmax.requires_grad = True
             self.step.requires_grad = True
-        
 
     @torch.no_grad()
     def _clip_params(self):
@@ -92,7 +93,7 @@ class Quantizer(nn.Module):
 
     def forward(self, x: Tensor):
         # if mode is "bypass" we don't want to do quantization
-        if self.mode == "bypass":
+        if not self.activated:
             return x
         self._clip_params()
         qmin = -self.qmax if self.signed else torch.zeros_like(self.step)
@@ -215,8 +216,8 @@ class MPQReLU(MPQModule):
 
     def forward(self, x: Tensor) -> Tensor:
         ret = self.quant_a(x)
-        # No need to apply ReLU -- quantization is unsigned
-        if self.quant_a.mode != "bypass" and not self.quant_a.signed:
+        if self.quant_a.activated and not self.quant_a.signed:
+            # No need to apply ReLU -- quantization is unsigned
             assert torch.all(ret >= 0)
         else:
             # we don't apply quantization, so we need to apply ReLU here
