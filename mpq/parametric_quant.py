@@ -246,4 +246,5 @@ class MPQReLU(MPQModule):
 
     def get_activ_bytes(self):
         assert self._last_activ_shape is not None
-        return self.qa.b() * np.prod(self._last_activ_shape) / 8.0
+        # Skip batch dim
+        return self.qa.b() * np.prod(self._last_activ_shape[1:]) / 8.0
