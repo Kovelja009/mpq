@@ -3,22 +3,27 @@ from typing import TypeVar
 import pytorch_lightning as pl
 from mpq import MPQModule, Quantizer, resnet18
 from torch import nn
+from training_config import config
 
 T = TypeVar("T", bound=nn.Module)
 
 
 class CIFAR10MPQTrainer(pl.LightningModule):
-    def __init__(self, network: nn.Module, config:dict) -> None:
+    def __init__(self, network: nn.Module) -> None:
         from torchmetrics import Accuracy
 
         super().__init__()
         self.network = network
         self.qlayers = self._detect_layers(network, MPQModule)
         self.quantizers = self._detect_layers(network, Quantizer)
-        for quantizer in self.quantizers.values():
-            quantizer.set_mode(config["quantizer_mode"])
+        for name, quantizer in self.quantizers.items():
+            # activation params
+            if name.endswith("quant_a"):
+                quantizer.set_config(config["quantizer_mode"], config["activation_params"])
+            else: # weight params
+                quantizer.set_config(config["quantizer_mode"], config["weight_params"])
+        
         self.top1 = Accuracy("multiclass", num_classes=10, top_k=1)
-        self.config = config
 
     def training_step(self, batch, batch_idx):
         from torch.nn.functional import cross_entropy
@@ -83,7 +88,7 @@ class CIFAR10MPQTrainer(pl.LightningModule):
         optimizer = SGD(
             self.network.parameters(), lr=0.03, momentum=0.9, weight_decay=5e-4
         )
-        scheduler = MultiStepLR(optimizer, milestones=self.config["milestones"], gamma=0.1)
+        scheduler = MultiStepLR(optimizer, milestones=config["milestones"], gamma=0.1)
         return [optimizer], [scheduler]
 
     def compute_sizes_kb(self):
@@ -119,10 +124,10 @@ class CIFAR10MPQTrainer(pl.LightningModule):
         return quantizers
 
 
-def train_mpq(config: dict):
+def train_mpq():
     from pytorch_lightning import callbacks as plcb
 
-    model = CIFAR10MPQTrainer(resnet18(), config)
+    model = CIFAR10MPQTrainer(resnet18())
     val_metric = "val/top1"
     filename = "epoch={epoch}-metric={%s:.3f}" % val_metric
     ckpt = plcb.ModelCheckpoint(
@@ -141,10 +146,5 @@ def train_mpq(config: dict):
 
 
 if __name__ == "__main__":
-    # Load the training configuration
-    import json
-    with open('training_config.json') as f:
-        config = json.load(f)
-
-    train_mpq(config)
+    train_mpq()
 
