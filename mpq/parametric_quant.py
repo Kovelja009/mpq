@@ -216,7 +216,7 @@ class MPQReLU(MPQModule):
     def forward(self, x: Tensor) -> Tensor:
         ret = self.quant_a(x)
         # No need to apply ReLU -- quantization is unsigned
-        if self.quant_a.mode != "bypass":
+        if self.quant_a.mode != "bypass" and not self.quant_a.signed:
             assert torch.all(ret >= 0)
         else:
             # we don't apply quantization, so we need to apply ReLU here
