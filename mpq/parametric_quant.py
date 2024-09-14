@@ -63,7 +63,7 @@ class Quantizer(nn.Module):
     
     def set_qmax_step(self, bitwidth: int, signed: bool, step: dict[str, float], qmax: dict[str, float]):
         self.signed = signed
-        n_bits = bitwidth - int(signed)
+        n_bits = bitwidth - int(signed) # because in the b() function we add 1 bit for sign
 
         qmax_init = step["init"] * (2.0**n_bits - 1)
 
