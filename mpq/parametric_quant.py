@@ -6,6 +6,15 @@ import numpy as np
 import torch
 from torch import Tensor, nn
 
+__all__ = [
+    "Quantizer",
+    "MPQConv2d",
+    "MPQLinear",
+    "MPQReLU",
+    "MPQModule",
+    "QuantParamRange",
+]
+
 
 class STECeil(torch.autograd.Function):
     """Straight-Through Estimator for the ceil function.
@@ -217,12 +226,12 @@ class MPQReLU(MPQModule):
         qmax_init = step_init * (2.0**activ_bitwidth - 1)
         step = QuantParamRange(2**-3, 2**-8, 1)
         qmax = QuantParamRange(qmax_init, 2**-8, 255)
-        self.quant_a = Quantizer(qmax, step, signed=False)
+        self.qa = Quantizer(qmax, step, signed=False)
         self._last_activ_shape: torch.Size | None = None
 
     def forward(self, x: Tensor) -> Tensor:
-        ret = self.quant_a(x)
-        if self.quant_a.activated and not self.quant_a.signed:
+        ret = self.qa(x)
+        if self.qa.activated and not self.qa.signed:
             # No need to apply ReLU -- quantization is unsigned
             assert torch.all(ret >= 0)
         else:
@@ -237,4 +246,4 @@ class MPQReLU(MPQModule):
 
     def get_activ_bytes(self):
         assert self._last_activ_shape is not None
-        return self.quant_a.b() * np.prod(self._last_activ_shape) / 8.0
+        return self.qa.b() * np.prod(self._last_activ_shape) / 8.0

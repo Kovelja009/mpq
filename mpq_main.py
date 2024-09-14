@@ -3,7 +3,7 @@ from typing import TypeVar
 import pytorch_lightning as pl
 from torch import nn
 
-from mpq import MPQModule, Quantizer, resnet18
+from mpq import MPQModule, Quantizer, resnet20
 
 T = TypeVar("T", bound=nn.Module)
 
@@ -36,8 +36,6 @@ class CIFAR10MPQTrainer(pl.LightningModule):
             self.log(f"qbits/{name}", quantizer.b())
         # NOTE: When Quantizers are in bypass mode, weight_kb and activ_kb are constant
         # so it's fine to add them in.
-        # TODO: this. 0.1 is not appropriate
-        # because our DNN is actually larger than theirs (Sony's).
         return ce_loss + 0.1 * weight_kb + 0.1 * activ_kb
 
     def validation_step(self, batch, batch_idx):
@@ -79,9 +77,8 @@ class CIFAR10MPQTrainer(pl.LightningModule):
         from torch.optim.lr_scheduler import MultiStepLR
         from torch.optim.sgd import SGD
 
-        # Learning rate starts from 0.03 and decays by 0.1 at epochs 80 and 120
         optimizer = SGD(
-            self.network.parameters(), lr=0.03, momentum=0.9, weight_decay=5e-4
+            self.network.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4
         )
         scheduler = MultiStepLR(
             optimizer, milestones=self.config["milestones"], gamma=0.1
@@ -124,7 +121,7 @@ class CIFAR10MPQTrainer(pl.LightningModule):
 def train_mpq(config: dict):
     from pytorch_lightning import callbacks as plcb
 
-    model = CIFAR10MPQTrainer(resnet18(), config)
+    model = CIFAR10MPQTrainer(resnet20(), config)
     val_metric = "val/top1"
     filename = "epoch={epoch}-metric={%s:.3f}" % val_metric
     ckpt = plcb.ModelCheckpoint(
