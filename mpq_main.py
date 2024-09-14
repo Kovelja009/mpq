@@ -1,26 +1,27 @@
 from typing import TypeVar
 
 import pytorch_lightning as pl
+import torch
 from torch import nn
 
-from mpq import MPQModule, Quantizer, resnet20
+from mpq import MPQModule, Quantizer, mpq_resnet
 
 T = TypeVar("T", bound=nn.Module)
 
 
 class CIFAR10MPQTrainer(pl.LightningModule):
-    def __init__(self, network: nn.Module, config: dict) -> None:
+    def __init__(self, arch: str, config: dict) -> None:
         from torchmetrics import Accuracy
 
         super().__init__()
-        self.network = network
+        self.network = network = getattr(mpq_resnet, arch)()
         self.qlayers = self._detect_layers(network, MPQModule)
         self.quantizers = self._detect_layers(network, Quantizer)
         for quantizer in self.quantizers.values():
             quantizer.set_mode(config["quantizer_mode"])
         self.top1 = Accuracy("multiclass", num_classes=10, top_k=1)
         self.config = config
-        self.save_hyperparameters(config)
+        self.save_hyperparameters()
 
     def training_step(self, batch, batch_idx):
         from torch.nn.functional import cross_entropy
@@ -87,10 +88,15 @@ class CIFAR10MPQTrainer(pl.LightningModule):
 
     def compute_sizes_kb(self):
         """Compute the size of the weights and activations in kilobytes."""
+        zero = torch.tensor(0.0)
         weight = sum(
-            quantizer.get_weight_bytes() for quantizer in self.qlayers.values()
+            (quantizer.get_weight_bytes() for quantizer in self.qlayers.values()),
+            start=zero,
         )
-        activ = sum(quantizer.get_activ_bytes() for quantizer in self.qlayers.values())
+        activ = sum(
+            (quantizer.get_activ_bytes() for quantizer in self.qlayers.values()),
+            start=zero,
+        )
         return weight / 1024.0, activ / 1024.0
 
     def _train_val_dataloader(self, dataset_path):
@@ -121,7 +127,7 @@ class CIFAR10MPQTrainer(pl.LightningModule):
 def train_mpq(config: dict):
     from pytorch_lightning import callbacks as plcb
 
-    model = CIFAR10MPQTrainer(resnet20(), config)
+    model = CIFAR10MPQTrainer("resnet20", config)
     val_metric = "val/top1"
     filename = "epoch={epoch}-metric={%s:.3f}" % val_metric
     ckpt = plcb.ModelCheckpoint(
