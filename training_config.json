@@ -1,5 +1,0 @@
-{
-    "n_epochs": 4,
-    "milestones": [30, 45],
-    "quantizer_mode" : "bypass"
-}

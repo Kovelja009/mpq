@@ -1,6 +1,6 @@
 import abc
 from dataclasses import dataclass
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -67,6 +67,26 @@ class Quantizer(nn.Module):
         self.b_min = b_min
         self.activated = True
 
+    def set_config(self, mode: str, bitwidth_params: dict[str, Any]):
+        self.set_qmax_step(**bitwidth_params)
+        self.set_mode(mode)
+
+    def set_qmax_step(
+        self,
+        bitwidth: int,
+        signed: bool,
+        step: dict[str, float],
+        qmax: dict[str, float],
+    ):
+        self.signed = signed
+        # because in the b() function we add 1 bit for sign
+        n_bits = bitwidth - int(signed)
+        qmax_init = step["init"] * (2.0**n_bits - 1)
+        self.qmax_min, self.qmax_max = qmax["min"], 2 ** (n_bits - 1) - 1
+        self.step_min, self.step_max = step["min"], step["max"]
+        self.qmax.data.copy_(qmax_init)
+        self.step.data.copy_(step["init"])
+
     def set_mode(self, mode: str):
         if mode in ["fixed", "bypass"]:
             self.qmax.requires_grad = False
@@ -125,16 +145,17 @@ def get_weight_quantizers(weight: Tensor, bias: Tensor | None):
         wmax_to_intmax = wmax_to_intmax.ceil() if bits > 4 else wmax_to_intmax.floor()
         return (2**wmax_to_intmax).item()
 
-    weight_bits = 4
-    step_init = find_step(weight, weight_bits)
-    qmax_init = step_init * (2 ** (weight_bits - 1) - 1)
-    qmax = QuantParamRange(qmax_init, 2**-8, 127)
+    signed = True
+    weight_bits = 32 - int(signed)
+    step_init = 2**-3
+    qmax_init = step_init * (2.0**weight_bits - 1)
+    qmax = QuantParamRange(qmax_init, 2**-8, 2 ** (weight_bits - 1) - 1)
     step = QuantParamRange(step_init, 2**-8, 1)
     # TODO: should probably find step for bias as well
     # TODO: shouldn't bias quantization follow activation quantization?
-    quant_w = Quantizer(qmax, step, signed=True)
+    quant_w = Quantizer(qmax, step, signed=signed)
     if bias is not None:
-        quant_b = Quantizer(qmax, step, signed=True)
+        quant_b = Quantizer(qmax, step, signed=signed)
         return quant_w, quant_b
     else:
         return quant_w, None
@@ -222,7 +243,7 @@ class MPQReLU(MPQModule):
     def __init__(self) -> None:
         super().__init__()
         step_init = 2**-3
-        activ_bitwidth = 8
+        activ_bitwidth = 16
         qmax_init = step_init * (2.0**activ_bitwidth - 1)
         step = QuantParamRange(2**-3, 2**-8, 1)
         qmax = QuantParamRange(qmax_init, 2**-8, 255)
