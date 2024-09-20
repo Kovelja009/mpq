@@ -5,29 +5,22 @@ import torch
 from torch import nn
 
 from mpq import MPQModule, Quantizer, mpq_resnet
-from training_config import config
 
 T = TypeVar("T", bound=nn.Module)
 
 
 class CIFAR10MPQTrainer(pl.LightningModule):
-    def __init__(self, arch: str) -> None:
+    def __init__(self, arch: str, config: dict) -> None:
         from torchmetrics import Accuracy
 
         super().__init__()
         self.network = network = getattr(mpq_resnet, arch)()
         self.qlayers = self._detect_layers(network, MPQModule)
         self.quantizers = self._detect_layers(network, Quantizer)
-        for name, quantizer in self.quantizers.items():
-            # activation params
-            if name.endswith("aq"):
-                quantizer.set_config(
-                    config["quantizer_mode"], config["activation_params"]
-                )
-            else:  # weight params
-                quantizer.set_config(config["quantizer_mode"], config["weight_params"])
-
+        for qlayer in self.qlayers.values():
+            qlayer.set_config(config)
         self.top1 = Accuracy("multiclass", num_classes=10, top_k=1)
+        self.config = config
         self.save_hyperparameters()
 
     def training_step(self, batch, batch_idx):
@@ -86,9 +79,9 @@ class CIFAR10MPQTrainer(pl.LightningModule):
         from torch.optim.sgd import SGD
 
         optimizer = SGD(
-            self.network.parameters(), lr=0.03, momentum=0.9, weight_decay=5e-4
+            self.network.parameters(), lr=self.config["lr"], momentum=0.9, weight_decay=5e-4
         )
-        scheduler = MultiStepLR(optimizer, milestones=config["milestones"], gamma=0.1)
+        scheduler = MultiStepLR(optimizer, **self.config["lr_schedule"])
         return [optimizer], [scheduler]
 
     def compute_sizes_kb(self):
@@ -131,8 +124,11 @@ class CIFAR10MPQTrainer(pl.LightningModule):
 
 def train_mpq():
     from pytorch_lightning import callbacks as plcb
+    from yaml import safe_load
 
-    model = CIFAR10MPQTrainer("resnet20")
+    with open("training_config.yaml") as f:
+        config = safe_load(f)
+    model = CIFAR10MPQTrainer("resnet20", config)
     val_metric = "val/top1"
     filename = "epoch={epoch}-metric={%s:.3f}" % val_metric
     ckpt = plcb.ModelCheckpoint(

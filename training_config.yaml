@@ -1,0 +1,17 @@
+n_epochs: 160
+lr: 0.03
+lr_schedule:
+  gamma: 0.1
+  milestones: [80, 120]
+quantizer_mode: mpq
+weight_mpq:
+  step_min: 0.00390625
+  step_max: 1
+  qmax_min: 0.00390625
+  b_init: 4
+activ_mpq:
+  step_init: 0.125
+  step_min: 0.00390625
+  step_max: 1
+  qmax_min: 0.00390625
+  b_init: 8

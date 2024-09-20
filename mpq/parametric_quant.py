@@ -1,5 +1,4 @@
 import abc
-from dataclasses import dataclass
 from typing import Any, cast
 
 import numpy as np
@@ -12,7 +11,6 @@ __all__ = [
     "MPQLinear",
     "MPQReLU",
     "MPQModule",
-    "QuantParamRange",
 ]
 
 
@@ -39,30 +37,16 @@ class STERound(torch.autograd.Function):
         return grad_output
 
 
-@dataclass
-class QuantParamRange:
-    init: float
-    min: float
-    max: float
-
-
 class Quantizer(nn.Module):
-    def __init__(
-        self,
-        qmax: QuantParamRange,
-        step: QuantParamRange,
-        signed: bool,
-        b_min: int = 2,
-        fix_parameters: bool = False,
-    ) -> None:
+    def __init__(self, signed: bool, b_min: int = 2) -> None:
         from torch.nn.parameter import Parameter
 
         super().__init__()
-        grad = not fix_parameters
-        self.qmax = Parameter(torch.tensor(qmax.init), requires_grad=grad)
-        self.qmax_min, self.qmax_max = qmax.min, qmax.max
-        self.step = Parameter(torch.tensor(step.init), requires_grad=grad)
-        self.step_min, self.step_max = step.min, step.max
+        # NOTE: override these values by calling `set_qmax_step` and `set_mode`
+        self.qmax = Parameter(torch.tensor(1.0), requires_grad=True)
+        self.qmax_min, self.qmax_max = 2**-8, 255.0
+        self.step = Parameter(torch.tensor(2**-3), requires_grad=True)
+        self.step_min, self.step_max = 2**-8, 1.0
         self.signed = signed
         self.b_min = b_min
         self.activated = True
@@ -73,19 +57,19 @@ class Quantizer(nn.Module):
 
     def set_qmax_step(
         self,
-        bitwidth: int,
-        signed: bool,
-        step: dict[str, float],
-        qmax: dict[str, float],
+        step_init: float,
+        step_min: float,
+        step_max: float,
+        qmax_min: float,
+        b_init: int,
     ):
-        self.signed = signed
         # because in the b() function we add 1 bit for sign
-        n_bits = bitwidth - int(signed)
-        qmax_init = step["init"] * (2.0**n_bits - 1)
-        self.qmax_min, self.qmax_max = qmax["min"], 2 ** (n_bits - 1) - 1
-        self.step_min, self.step_max = step["min"], step["max"]
-        self.qmax.data.copy_(qmax_init)
-        self.step.data.copy_(step["init"])
+        b_init = b_init - int(self.signed)
+        qmax_init = step_init * (2.0**b_init - 1)
+        self.qmax_min, self.qmax_max = qmax_min, 2 ** (b_init - 1) - 1
+        self.step_min, self.step_max = step_min, step_max
+        self.qmax.data.copy_(qmax_init)  # type: ignore
+        self.step.data.copy_(step_init)  # type: ignore
 
     def set_mode(self, mode: str):
         if mode in ["fixed", "bypass"]:
@@ -138,30 +122,18 @@ class Quantizer(nn.Module):
         return f"d={self.step.data}, qmax={self.qmax.data}, b(derived)={self.b()}"
 
 
-def get_weight_quantizers(weight: Tensor, bias: Tensor | None):
-    def find_step(param: Tensor, bits: int):
-        maxabs_w = param.abs().max() + np.finfo(np.float32).eps
-        wmax_to_intmax = torch.log2(maxabs_w / (2 ** (bits - 1) - 1))
-        wmax_to_intmax = wmax_to_intmax.ceil() if bits > 4 else wmax_to_intmax.floor()
-        return (2**wmax_to_intmax).item()
-
-    signed = True
-    weight_bits = 32 - int(signed)
-    step_init = 2**-3
-    qmax_init = step_init * (2.0**weight_bits - 1)
-    qmax = QuantParamRange(qmax_init, 2**-8, 2 ** (weight_bits - 1) - 1)
-    step = QuantParamRange(step_init, 2**-8, 1)
-    # TODO: should probably find step for bias as well
-    # TODO: shouldn't bias quantization follow activation quantization?
-    quant_w = Quantizer(qmax, step, signed=signed)
-    if bias is not None:
-        quant_b = Quantizer(qmax, step, signed=signed)
-        return quant_w, quant_b
-    else:
-        return quant_w, None
+def find_step(param: Tensor, bits: int):
+    maxabs_w = param.abs().max() + np.finfo(np.float32).eps
+    wmax_to_intmax = torch.log2(maxabs_w / (2 ** (bits - 1) - 1))
+    wmax_to_intmax = wmax_to_intmax.ceil() if bits > 4 else wmax_to_intmax.floor()
+    return (2**wmax_to_intmax).item()
 
 
 class MPQModule(nn.Module):
+    @abc.abstractmethod
+    def set_config(self, config: dict[str, Any]):
+        pass
+
     @abc.abstractmethod
     def get_weight_bytes(self) -> Tensor:
         pass
@@ -188,7 +160,20 @@ class MPQConv2d(MPQModule):
     def __init__(self, in_channel: int, out_channel: int, **conv_kwargs):
         super().__init__()
         self.conv = nn.Conv2d(in_channel, out_channel, **conv_kwargs)
-        self.qw, self.qb = get_weight_quantizers(self.conv.weight, self.conv.bias)
+        self.qw = Quantizer(signed=True)
+        self.qb = None if self.conv.bias is None else Quantizer(signed=True)
+
+    def set_config(self, config: dict[str, Any]):
+        mode = config["quantizer_mode"]
+        config = config["weight_mpq"]
+        step_init = find_step(self.conv.weight, config["b_init"])
+        # TODO: should probably find step for bias as well
+        # TODO: shouldn't bias quantization follow activation quantization?
+        self.qw.set_qmax_step(step_init=step_init, **config)
+        self.qw.set_mode(mode)
+        if self.qb is not None:
+            self.qb.set_qmax_step(step_init=step_init, **config)
+            self.qb.set_mode(mode)
 
     def forward(self, x):
         # TODO: modify the weight and bias of the conv layer in place or not?
@@ -223,7 +208,20 @@ class MPQLinear(MPQModule):
     def __init__(self, in_features: int, out_features: int, **linear_kwargs):
         super().__init__()
         self.linear = nn.Linear(in_features, out_features, **linear_kwargs)
-        self.qw, self.qb = get_weight_quantizers(self.linear.weight, self.linear.bias)
+        self.qw = Quantizer(signed=True)
+        self.qb = None if self.linear.bias is None else Quantizer(signed=True)
+
+    def set_config(self, config: dict[str, Any]):
+        mode = config["quantizer_mode"]
+        config = config["weight_mpq"]
+        step_init = find_step(self.linear.weight, config["b_init"])
+        # TODO: should probably find step for bias as well
+        # TODO: shouldn't bias quantization follow activation quantization?
+        self.qw.set_qmax_step(step_init=step_init, **config)
+        self.qw.set_mode(mode)
+        if self.qb is not None:
+            self.qb.set_qmax_step(step_init=step_init, **config)
+            self.qb.set_mode(mode)
 
     def forward(self, x):
         w = self.qw(self.linear.weight)
@@ -242,13 +240,12 @@ class MPQLinear(MPQModule):
 class MPQReLU(MPQModule):
     def __init__(self) -> None:
         super().__init__()
-        step_init = 2**-3
-        activ_bitwidth = 16
-        qmax_init = step_init * (2.0**activ_bitwidth - 1)
-        step = QuantParamRange(2**-3, 2**-8, 1)
-        qmax = QuantParamRange(qmax_init, 2**-8, 255)
-        self.qa = Quantizer(qmax, step, signed=False)
+        self.qa = Quantizer(False)
         self._last_activ_shape: torch.Size | None = None
+
+    def set_config(self, config: dict[str, Any]):
+        self.qa.set_qmax_step(**config["activ_mpq"])
+        self.qa.set_mode(config["quantizer_mode"])
 
     def forward(self, x: Tensor) -> Tensor:
         ret = self.qa(x)
