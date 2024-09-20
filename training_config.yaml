@@ -4,6 +4,10 @@ lr_schedule:
   gamma: 0.1
   milestones: [80, 120]
 quantizer_mode: mpq
+target_weight_kb: 70.1
+target_activ_kb: 92.1
+weight_lambda: 0.1
+activ_lambda: 0.1
 weight_mpq:
   step_min: 0.00390625
   step_max: 1

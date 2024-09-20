@@ -37,7 +37,15 @@ class CIFAR10MPQTrainer(pl.LightningModule):
             self.log(f"qbits/{name}", quantizer.b())
         # NOTE: When Quantizers are in bypass mode, weight_kb and activ_kb are constant
         # so it's fine to add them in.
-        return ce_loss + 0.1 * weight_kb + 0.1 * activ_kb
+        twkb = self.config["target_weight_kb"]
+        wl = self.config["weight_lambda"]
+        twab = self.config["target_activ_kb"]
+        al = self.config["activ_lambda"]
+        return (
+            ce_loss
+            + wl * (weight_kb - twkb).relu() ** 2
+            + al * (activ_kb - twab).relu() ** 2
+        )
 
     def validation_step(self, batch, batch_idx):
         from torch.nn.functional import cross_entropy
@@ -79,7 +87,10 @@ class CIFAR10MPQTrainer(pl.LightningModule):
         from torch.optim.sgd import SGD
 
         optimizer = SGD(
-            self.network.parameters(), lr=self.config["lr"], momentum=0.9, weight_decay=5e-4
+            self.network.parameters(),
+            lr=self.config["lr"],
+            momentum=0.9,
+            weight_decay=2e-4,
         )
         scheduler = MultiStepLR(optimizer, **self.config["lr_schedule"])
         return [optimizer], [scheduler]
@@ -128,7 +139,9 @@ def train_mpq():
 
     with open("training_config.yaml") as f:
         config = safe_load(f)
-    model = CIFAR10MPQTrainer("resnet20", config)
+    model = CIFAR10MPQTrainer.load_from_checkpoint(
+        "lightning_logs/resnet20-ref.ckpt", config=config
+    )
     val_metric = "val/top1"
     filename = "epoch={epoch}-metric={%s:.3f}" % val_metric
     ckpt = plcb.ModelCheckpoint(
