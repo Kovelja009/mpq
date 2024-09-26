@@ -31,7 +31,7 @@ author, Yerlan Idelbayev.
 import torch.nn as nn
 import torch.nn.init as init
 
-from .parametric_quant import MPQConv2d, MPQLinear, MPQReLU
+from .parametric_quant import MPQConv2d, MPQLinear, MPQReLU, MPQGeLU
 
 __all__ = [
     "ResNet",
@@ -113,7 +113,7 @@ class ResNet(nn.Module):
         self.conv1 = nn.Sequential(
             MPQConv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False),
             nn.BatchNorm2d(16),
-            MPQReLU(),
+            MPQGeLU(),
         )
         self.layer1 = self._make_layer(block, 16, num_blocks[0], stride=1)
         self.layer2 = self._make_layer(block, 32, num_blocks[1], stride=2)

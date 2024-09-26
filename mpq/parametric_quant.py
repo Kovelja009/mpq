@@ -266,3 +266,31 @@ class MPQReLU(MPQModule):
         assert self._last_activ_shape is not None
         # Skip batch dim
         return self.qa.b() * np.prod(self._last_activ_shape[1:]) / 8.0
+    
+
+class MPQGeLU(MPQModule):
+    def __init__(self) -> None:
+        super().__init__()
+        self.qa = Quantizer(True)
+        self._last_activ_shape: torch.Size | None = None
+
+    def set_config(self, config: dict[str, Any]):
+        self.qa.set_qmax_step(**config["activ_mpq"])
+        self.qa.set_mode(config["quantizer_mode"])
+
+    def forward(self, x: Tensor) -> Tensor:
+        ret = self.qa(x)
+        # it's not `bypass` mode, so we need to apply GeLU
+        if not self.qa.activated:
+            ret = torch.nn.gelu(ret)
+        assert ret.shape == x.shape
+        self._last_activ_shape = x.shape
+        return ret
+    
+    def get_weight_bytes(self):
+        return torch.tensor(0.0)
+
+    def get_activ_bytes(self):
+        assert self._last_activ_shape is not None
+        # Skip batch dim
+        return self.qa.b() * np.prod(self._last_activ_shape[1:]) / 8.0
