@@ -14,8 +14,7 @@ weight_mpq:
   qmax_min: 0.00390625
   b_init: 4
 activ_mpq:
-  step_init: 0.125
   step_min: 0.00390625
   step_max: 1
   qmax_min: 0.00390625
-  b_init: 8
+  b_init: 4

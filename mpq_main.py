@@ -35,6 +35,12 @@ class CIFAR10MPQTrainer(pl.LightningModule):
         self.log("train/activ_kb", activ_kb)
         for name, quantizer in self.quantizers.items():
             self.log(f"qbits/{name}", quantizer.b())
+            if name.endswith("qa") and quantizer.activated == True and quantizer.qmax.requires_grad == True and quantizer.step.requires_grad == True and quantizer.qmax.grad is not None and quantizer.step.grad is not None:
+                self.log(f"activations_grad/{name}_qmax", quantizer.qmax.grad)
+                self.log(f"activations_grad/{name}_step", quantizer.step.grad)
+            elif not name.endswith("qa") and quantizer.activated == True and quantizer.qmax.requires_grad == True and quantizer.step.requires_grad == True and quantizer.qmax.grad is not None and quantizer.step.grad is not None:
+                self.log(f"weights_grad/{name}_qmax", quantizer.qmax.grad)
+                self.log(f"weights_grad/{name}_step", quantizer.step.grad)
         # NOTE: When Quantizers are in bypass mode, weight_kb and activ_kb are constant
         # so it's fine to add them in.
         twkb = self.config["target_weight_kb"]

@@ -244,7 +244,8 @@ class MPQReLU(MPQModule):
         self._last_activ_shape: torch.Size | None = None
 
     def set_config(self, config: dict[str, Any]):
-        self.qa.set_qmax_step(**config["activ_mpq"])
+        step_init = find_step(torch.ones(1), config["activ_mpq"]["b_init"])
+        self.qa.set_qmax_step(step_init=step_init, **config["activ_mpq"])
         self.qa.set_mode(config["quantizer_mode"])
 
     def forward(self, x: Tensor) -> Tensor:
